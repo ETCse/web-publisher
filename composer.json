@@ -37,6 +37,7 @@
   "autoload": {
     "psr-4": {
       "SWP\\Bundle\\": "src/SWP/Bundle/",
+      "ETC\\Bundle\\": "src/ETC/Bundle/",
       "SWP\\Component\\": "src/SWP/Component/",
       "SWP\\Bridge\\": "src/SWP/Bridge/",
       "SWP\\Behat\\": "src/SWP/Behat/"

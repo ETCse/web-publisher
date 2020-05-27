@@ -761,3 +761,12 @@ services:
 
     SWP\Bundle\CoreBundle\Hydrator\PackageHydratorInterface:
         alias: SWP\Bundle\CoreBundle\Hydrator\PackageHydrator
+    
+    ETC\Bundle\PaywallAdapter:
+        arguments:
+            -
+                serverUrl: "%env(resolve:PAYWALL_SERVER_URL)%"
+                credentials:
+                    secret: "%env(resolve:PAYWALL_SERVER_SECRET)%"
+            - '@SWP\Component\Paywall\Factory\SubscriptionFactory'
+            - '@GuzzleHttp\Client'
