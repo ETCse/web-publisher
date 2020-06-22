@@ -8,26 +8,19 @@ use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Session\SessionInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
 use Symfony\Component\Routing\Annotation\Route;
 
 class ExternalOauthController extends Controller
 {
     public const PUBLISHER_JWT_COOKIE = 'publisher_jwt';
-    public const PUBLISHER_REDIRECT_TO_AFTER_OAUTH = 'publisher_redirect_to_after_oauth';
 
     /**
      * @Route("/connect/oauth", name="connect_oauth_start")
      */
-    public function connectAction(Request $request, SessionInterface $session): Response
+    public function connectAction(Request $request): Response
     {
-        if ($request->query->has("redirect_to_route_when_successful")) {
-            $session->set(
-                self::PUBLISHER_REDIRECT_TO_AFTER_OAUTH,
-                $request->query->get("redirect_to_route_when_successful")
-           );
-        }
+        $referer = $request->headers->get('referer');
 
         $clientRegistry = $this->get('knpu.oauth2.registry');
 
@@ -35,7 +28,7 @@ class ExternalOauthController extends Controller
             ->getClient('external_oauth')
             ->redirect([
                 'openid', 'email', 'profile',
-            ]);
+            ], ["state" => $referer]);
     }
 
     /**
@@ -43,7 +36,7 @@ class ExternalOauthController extends Controller
      *
      * @Route("/connect/oauth/check", name="connect_oauth_check")
      */
-    public function connectCheckAction(JWTTokenManagerInterface $jwtTokenManager, SessionInterface $session): Response
+    public function connectCheckAction(Request $request, JWTTokenManagerInterface $jwtTokenManager): Response
     {
         // If we didn't log in, something went wrong. Throw an exception!
         if (!($user = $this->getUser())) {
@@ -53,12 +46,8 @@ class ExternalOauthController extends Controller
             return $response;
         }
 
-        if ($session->has(self::PUBLISHER_REDIRECT_TO_AFTER_OAUTH)) {
-            $redirectRoute = $session->remove(self::PUBLISHER_REDIRECT_TO_AFTER_OAUTH);
-            $response = $this->redirect($redirectRoute);
-        } else {
-            $response = $this->redirectToRoute('homepage');
-        }
+        $state = $request->query->get('state');
+        $response = $this->redirect($state);
         
         $response->headers->setCookie(Cookie::create(self::PUBLISHER_JWT_COOKIE, $jwtTokenManager->create($user)));
 
