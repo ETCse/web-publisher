@@ -27,7 +27,13 @@ final class PaywallAdapter implements PaywallAdapterInterface
 
     public function getSubscription(SubscriberInterface $subscriber, array $filters = []): ?SubscriptionInterface
     {
-        $allSubscriptions = $this->getAllSubscriptionsFromKayak($subscriber->getEmail());
+        $customerNumber = $this->getCustomerNumberFromUsersApi($subscriber->getEmail());
+
+        if (empty($customerNumber)) {
+            return $this->createInactiveSubscription($filters['name']);
+        }
+
+        $allSubscriptions = $this->getAllSubscriptionsFromKayak($customerNumber);
 
         $userSubscription;
         foreach ($allSubscriptions as $subscription) {
@@ -39,15 +45,23 @@ final class PaywallAdapter implements PaywallAdapterInterface
 
         return isset($userSubscription) ? $userSubscription : $this->createInactiveSubscription($filters['name']);
     }
+    
+    private function getCustomerNumberFromUsersApi($emailAddress): String
+    {
+        $response = $this->client->request('GET', $this->config['usersApiUrl'] . "/users/$emailAddress");
+        $json = json_decode((string) $response->getBody(), true);
+        $userObject = $json["data"];
+        return $userObject["customer_number"];
+    }
 
-    private function getAllSubscriptionsFromKayak($emailAddress) 
+    private function getAllSubscriptionsFromKayak($customerNumber) 
     {
         $response = $this->client->request('POST', $this->config['serverUrl'] . '/v1/subscriptions', [
             'headers' => [
                 'secret-token' => $this->config['credentials']['secret']
             ],
             'json' => [
-                'email_address' => $emailAddress
+                'customer_number' => $customerNumber
             ]
         ]);
 
@@ -88,7 +102,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
             'H-ETC' => 'Nyhetsmagasinet&nbsp;ETC'
         );
 
-        return $paperMap[$paperShortcode];
+        return isset($paperMap[$paperShortcode]) ? $paperMap[$paperShortcode] : $kayakObject['paper_name'];
     }
 
 }

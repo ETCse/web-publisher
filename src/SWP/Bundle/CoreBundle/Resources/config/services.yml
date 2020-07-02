@@ -766,6 +766,7 @@ services:
         arguments:
             -
                 serverUrl: "%env(resolve:PAYWALL_SERVER_URL)%"
+                usersApiUrl: "%env(resolve:PAYWALL_USERS_SERVER_URL)%"
                 credentials:
                     secret: "%env(resolve:PAYWALL_SERVER_SECRET)%"
             - '@SWP\Component\Paywall\Factory\SubscriptionFactory'
