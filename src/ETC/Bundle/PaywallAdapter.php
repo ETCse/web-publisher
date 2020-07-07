@@ -27,35 +27,50 @@ final class PaywallAdapter implements PaywallAdapterInterface
 
     public function getSubscription(SubscriberInterface $subscriber, array $filters = []): ?SubscriptionInterface
     {
-        $customerNumber = $this->getCustomerNumberFromUsersApi($subscriber->getEmail());
+        $paperCode = $filters['name'];
 
-        if (empty($customerNumber)) {
-            return $this->createInactiveSubscription($filters['name']);
+        $userSubscription = $this->getActiveSubscriptionFromKayak($subscriber->getEmail(), $paperCode);
+
+        if (isset($userSubscription)) {
+            return $userSubscription;
         }
 
-        $allSubscriptions = $this->getAllSubscriptionsFromKayak($customerNumber);
+        // Eventhough there are no active user subsctiptions in kayak, a user might
+        // very recently have signed up. Registering users to kayak is a manual process
+        // done by customer support. That means that we need to check if the user has
+        // recently registered for a subscription and if they have; we let them read the
+        // content.
+        $tempUserSubscription = $this->getActiveSubscriptionFromUsersApi($subscriber->getEmail(), $paperCode);
 
-        $userSubscription;
+        if (isset($tempUserSubscription)) {
+            return $tempUserSubscription;
+        }
+
+        return $this->createInactiveSubscription($paperCode);
+    }
+    
+    private function getActiveSubscriptionFromKayak($email, $paperCode): ?SubscriptionInterface
+    {
+        $allSubscriptions = $this->getAllSubscriptionsFromKayak($email);
+
         foreach ($allSubscriptions as $subscription) {
-            if ($subscription->getCode() == $filters['name'] && $subscription->isActive()) {
-                $userSubscription = $subscription;
-            break;
+            if ($subscription->getCode() == $paperCode && $subscription->isActive()) {
+                return $subscription;
+                break;
             }
         }
 
-        return isset($userSubscription) ? $userSubscription : $this->createInactiveSubscription($filters['name']);
-    }
-    
-    private function getCustomerNumberFromUsersApi($emailAddress): String
-    {
-        $response = $this->client->request('GET', $this->config['usersApiUrl'] . "/users/$emailAddress");
-        $json = json_decode((string) $response->getBody(), true);
-        $userObject = $json["data"];
-        return $userObject["customer_number"];
+        return null;
     }
 
-    private function getAllSubscriptionsFromKayak($customerNumber) 
+    private function getAllSubscriptionsFromKayak($email)
     {
+        $customerNumber = $this->getCustomerNumberFromUsersApi($email);
+
+        if (empty($customerNumber)) {
+            return [];
+        }
+
         $response = $this->client->request('POST', $this->config['serverUrl'] . '/v1/subscriptions', [
             'headers' => [
                 'secret-token' => $this->config['credentials']['secret']
@@ -75,13 +90,62 @@ final class PaywallAdapter implements PaywallAdapterInterface
         return $subscriptions;
     }
 
+    private function getCustomerNumberFromUsersApi($email): String
+    {
+        $response = $this->client->request('GET', $this->config['usersApiUrl'] . "/users/$email");
+        $json = json_decode((string) $response->getBody(), true);
+        $userObject = $json["data"];
+        return $userObject["customer_number"];
+    }
+
+
     private function createSubscriptionFromKayakData($kayakObject): SubscriptionInterface
     {
         $subscription = $this->subscriptionFactory->create();
         $subscription->setId($kayakObject['subscription_number']);
         $subscription->setCode($kayakObject['paper_shortcode']);
         $subscription->setActive($kayakObject['subscription_is_active']);
-        $subscription->setDetails(["paperName" => $this->getPaperName($kayakObject)]);
+        $subscription->setDetails(["paperName" => $this->getPaperName($kayakObject['paper_shortcode'], $kayakObject['paper_name'])]);
+        return $subscription;
+    }
+
+    private function getActiveSubscriptionFromUsersApi($email, $paperCode): ?SubscriptionInterface
+    {
+        $allSubscriptions = $this->getAllSubscriptionsFromUsersApi($email, $paperCode);
+
+        foreach ($allSubscriptions as $subscription) {
+            if ($subscription->getCode() == $paperCode && $subscription->isActive()) {
+                return $subscription;                
+            }
+        }
+
+        return null;
+    }
+
+    private function getAllSubscriptionsFromUsersApi($email, $paperCode)
+    {
+        $response = $this->client->request('GET', $this->config['usersApiUrl'] . "/subscriptions/$email");
+        $json = json_decode((string) $response->getBody(), true);
+
+        $subscriptions = [];
+        foreach ($json["data"] as $subscriptionObject) {
+            $subscriptions[] = $this->createSubscriptionFromUsersApiData($subscriptionObject);
+        }
+        
+        return $subscriptions;
+    }
+
+    private function createSubscriptionFromUsersApiData($subscriptionObject): SubscriptionInterface
+    {
+        $cutoffDateTime =  (new DateTime())->modify('-12 hours');
+        $createdAt = date_create_from_format('U', strval($subscriptionObject['created_at']));
+        $isActive = $createdAt > $cutoffDateTime;
+
+        $subscription = $this->subscriptionFactory->create();
+        $subscription->setId('N/A');
+        $subscription->setCode($subscriptionObject['paper_code']);
+        $subscription->setActive($isActive);
+        $subscription->setDetails(["paperName" => $this->getPaperName($subscriptionObject['paper_code'], $subscriptionObject['paper_code'])]);
         return $subscription;
     }
 
@@ -94,15 +158,14 @@ final class PaywallAdapter implements PaywallAdapterInterface
         return $subscription;
     }
 
-    private function getPaperName($kayakObject): String
+    private function getPaperName($paperShortcode, $defaultPaperName): String
     {
-        $paperShortcode = $kayakObject['paper_shortcode'];
         $paperMap = array(
             'D-ETC' => 'Dagens&nbsp;ETC',
             'H-ETC' => 'Nyhetsmagasinet&nbsp;ETC'
         );
 
-        return isset($paperMap[$paperShortcode]) ? $paperMap[$paperShortcode] : $kayakObject['paper_name'];
+        return isset($paperMap[$paperShortcode]) ? $paperMap[$paperShortcode] : $defaultPaperName;
     }
 
 }
