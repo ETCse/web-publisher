@@ -90,7 +90,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
         return $subscriptions;
     }
 
-    private function getCustomerNumberFromUsersApi($email): String
+    private function getCustomerNumberFromUsersApi($email): ?String
     {
         $response = $this->client->request('GET', $this->config['usersApiUrl'] . "/users/$email");
         $json = json_decode((string) $response->getBody(), true);
