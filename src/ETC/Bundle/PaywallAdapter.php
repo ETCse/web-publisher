@@ -34,54 +34,62 @@ final class PaywallAdapter implements PaywallAdapterInterface
         SubscriberInterface $subscriber,
         array $filters = []
     ): ?SubscriptionInterface {
-        $paperCode = $filters['name'];
+        $articlePaperCode = $filters['name'];
 
-        $userSubscription = $this->getActiveSubscriptionFromKayak(
+        return $this->getActiveSubscriptionFromKayak(
             $subscriber->getEmail(),
-            $paperCode
-        );
-
-        if (isset($userSubscription)) {
-            return $userSubscription;
-        }
-
-        // Eventhough there are no active user subsctiptions in kayak, a user might
-        // very recently have signed up. Registering users to kayak is a manual process
-        // done by customer support. That means that we need to check if the user has
-        // recently registered for a subscription and if they have; we let them read the
-        // content.
-        $tempUserSubscription = $this->getActiveSubscriptionFromUsersApi(
-            $subscriber->getEmail(),
-            $paperCode
-        );
-
-        if (isset($tempUserSubscription)) {
-            return $tempUserSubscription;
-        }
-
-        return $this->createInactiveSubscription($paperCode);
+            $articlePaperCode
+        ) ??
+            ($this->getActiveSubscriptionFromUsersApi(
+                $subscriber->getEmail(),
+                $articlePaperCode
+            ) ??
+                $this->createInactiveSubscription($articlePaperCode));
     }
 
     private function getActiveSubscriptionFromKayak(
-        $email,
-        $paperCode
+        string $email,
+        string $paperCode
     ): ?SubscriptionInterface {
         $allSubscriptions = $this->getAllSubscriptionsFromKayak($email);
 
-        foreach ($allSubscriptions as $subscription) {
-            if (
-                $subscription->getCode() == $paperCode &&
-                $subscription->isActive()
-            ) {
-                return $subscription;
-                break;
-            }
-        }
+        $activeSubscriptions = array_filter($allSubscriptions, function (
+            $subscription
+        ) {
+            return $subscription->isActive();
+        });
 
-        return null;
+        $validSubscription = array_reduce($activeSubscriptions, function (
+            $carry,
+            $subscription
+        ) use ($paperCode) {
+            return $carry ??
+                ($this->isValidSubscriptionForArticlePaperCode(
+                    $subscription,
+                    $paperCode
+                )
+                    ? $subscription
+                    : null);
+        });
+
+        return $validSubscription;
     }
 
-    private function getAllSubscriptionsFromKayak($email)
+    private function isValidSubscriptionForArticlePaperCode(
+        SubscriptionInterface $subscription,
+        string $articlePaperCode
+    ): bool {
+        // D-ETC and GBG subscriptions should have access to both paper codes.
+        // All other codes should only have access to itself.
+        $validSubscriptionCodes =
+            $articlePaperCode == 'D-ETC' || $articlePaperCode == 'GBG'
+                ? ['GBG', 'D-ETC']
+                : [$articlePaperCode];
+
+        return in_array($subscription->getCode(), $validSubscriptionCodes);
+    }
+
+    private function getAllSubscriptionsFromKayak(string $email): array
     {
         $customerNumber = $this->getCustomerNumberFromUsersApi($email);
 
@@ -114,7 +122,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
         return $subscriptions;
     }
 
-    private function getCustomerNumberFromUsersApi($email): ?string
+    private function getCustomerNumberFromUsersApi(string $email): ?string
     {
         $response = $this->client->request(
             'GET',
@@ -147,8 +155,8 @@ final class PaywallAdapter implements PaywallAdapterInterface
     }
 
     private function getActiveSubscriptionFromUsersApi(
-        $email,
-        $paperCode
+        string $email,
+        string $paperCode
     ): ?SubscriptionInterface {
         $allSubscriptions = $this->getAllSubscriptionsFromUsersApi(
             $email,
@@ -167,8 +175,10 @@ final class PaywallAdapter implements PaywallAdapterInterface
         return null;
     }
 
-    private function getAllSubscriptionsFromUsersApi($email, $paperCode)
-    {
+    private function getAllSubscriptionsFromUsersApi(
+        string $email,
+        string $paperCode
+    ): array {
         $response = $this->client->request(
             'GET',
             $this->config['usersApiUrl'] . "/subscriptions/$email"
@@ -208,8 +218,9 @@ final class PaywallAdapter implements PaywallAdapterInterface
         return $subscription;
     }
 
-    private function createInactiveSubscription($code): SubscriptionInterface
-    {
+    private function createInactiveSubscription(
+        string $code
+    ): SubscriptionInterface {
         $subscription = $this->subscriptionFactory->create();
         $subscription->setId("-1");
         $subscription->setCode($code);
@@ -217,10 +228,13 @@ final class PaywallAdapter implements PaywallAdapterInterface
         return $subscription;
     }
 
-    private function getPaperName($paperShortcode, $defaultPaperName): string
-    {
+    private function getPaperName(
+        string $paperShortcode,
+        string $defaultPaperName
+    ): string {
         $paperMap = [
             'D-ETC' => 'Dagens&nbsp;ETC',
+            'GBG' => 'ETC&nbsp;Göteborg',
             'H-ETC' => 'Nyhetsmagasinet&nbsp;ETC',
         ];
 
