@@ -40,11 +40,11 @@ final class PaywallAdapter implements PaywallAdapterInterface
 
         return $this->getActiveSubscriptionFromKayak(
             $subscriber->getEmail(),
-            $articlePaperCode
+            $articlePaperCode,
         ) ??
             ($this->getActiveSubscriptionFromUsersApi(
                 $subscriber->getEmail(),
-                $articlePaperCode
+                $articlePaperCode,
             ) ??
                 $this->createInactiveSubscription($articlePaperCode));
     }
@@ -68,7 +68,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
             return $carry ??
                 ($this->isValidSubscriptionForArticlePaperCode(
                     $subscription,
-                    $paperCode
+                    $paperCode,
                 )
                     ? $subscription
                     : null);
@@ -99,8 +99,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
             return [];
         }
 
-        $response = $this->client->request(
-            'POST',
+        $response = $this->client->post(
             $this->config['serverUrl'] . '/v1/subscriptions',
             [
                 'headers' => [
@@ -109,15 +108,20 @@ final class PaywallAdapter implements PaywallAdapterInterface
                 'json' => [
                     'customer_number' => $customerNumber,
                 ],
-            ]
+                'http_errors' => false,
+            ],
         );
+
+        if ($response->getStatusCode() != 200) {
+            return [];
+        }
 
         $json = json_decode((string) $response->getBody(), true);
 
         $subscriptions = [];
         foreach ($json["data"] as $kayakObject) {
             $subscriptions[] = $this->createSubscriptionFromKayakData(
-                $kayakObject
+                $kayakObject,
             );
         }
 
@@ -126,18 +130,18 @@ final class PaywallAdapter implements PaywallAdapterInterface
 
     private function getCustomerNumberFromUsersApi(string $email): ?string
     {
-        $response = $this->client->request(
-            'GET',
-            $this->config['usersApiUrl'] . "/users/$email"
+        $response = $this->client->get(
+            $this->config['usersApiUrl'] . "/users/$email",
+            ['http_errors' => false],
         );
 
-        if ($response->getStatusCode() == 200) {
-            $json = json_decode((string) $response->getBody(), true);
-            $userObject = $json["data"];
-            return $userObject["customer_number"];
+        if ($response->getStatusCode() != 200) {
+            return null;
         }
 
-        return null;
+        $json = json_decode((string) $response->getBody(), true);
+        $userObject = $json["data"];
+        return $userObject["customer_number"];
     }
 
     private function createSubscriptionFromKayakData(
@@ -150,7 +154,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
         $subscription->setDetails([
             "paperName" => $this->getPaperName(
                 $kayakObject['paper_shortcode'],
-                $kayakObject['paper_name']
+                $kayakObject['paper_name'],
             ),
         ]);
         return $subscription;
@@ -162,7 +166,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
     ): ?SubscriptionInterface {
         $allSubscriptions = $this->getAllSubscriptionsFromUsersApi(
             $email,
-            $paperCode
+            $paperCode,
         );
 
         foreach ($allSubscriptions as $subscription) {
@@ -181,16 +185,21 @@ final class PaywallAdapter implements PaywallAdapterInterface
         string $email,
         string $paperCode
     ): array {
-        $response = $this->client->request(
-            'GET',
-            $this->config['usersApiUrl'] . "/subscriptions/$email"
+        $response = $this->client->get(
+            $this->config['usersApiUrl'] . "/subscriptions/$email",
+            ['http_errors' => false],
         );
+
+        if ($response->getStatusCode() != 200) {
+            return [];
+        }
+
         $json = json_decode((string) $response->getBody(), true);
 
         $subscriptions = [];
         foreach ($json["data"] as $subscriptionObject) {
             $subscriptions[] = $this->createSubscriptionFromUsersApiData(
-                $subscriptionObject
+                $subscriptionObject,
             );
         }
 
@@ -203,7 +212,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
         $cutoffDateTime = (new DateTime())->modify('-12 hours');
         $createdAt = date_create_from_format(
             'U',
-            strval($subscriptionObject['created_at'])
+            strval($subscriptionObject['created_at']),
         );
         $isActive = $createdAt > $cutoffDateTime;
 
@@ -214,7 +223,7 @@ final class PaywallAdapter implements PaywallAdapterInterface
         $subscription->setDetails([
             "paperName" => $this->getPaperName(
                 $subscriptionObject['paper_code'],
-                $subscriptionObject['paper_code']
+                $subscriptionObject['paper_code'],
             ),
         ]);
         return $subscription;
